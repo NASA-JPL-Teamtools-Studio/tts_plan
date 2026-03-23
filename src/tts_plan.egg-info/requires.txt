@@ -1,0 +1,5 @@
+pytest
+tomli
+tts-data-utils<1.0.0,>=0.7.1
+tts-html-utils<1.0.0,>=0.5.2
+tts-utilities<1.0.0,>=0.3.0

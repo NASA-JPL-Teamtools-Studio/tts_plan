@@ -3,14 +3,14 @@ name = "tts-plan"
 description = "A bare bones planning and scheduling tool for TTS."
 readme = "README.md"
 requires-python = ">=3.6"
-license = {text = "Unlicense"}
+license = {text = "Apache-2.0"}
 authors = [
   { name = "shanemb", email = "shane.m.bonkowski@jpl.nasa.gov" },
   { name = "muszynsk", email = "matt.muszynski@jpl.nasa.gov" },
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: Unlicense",
+  "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
   "pytest", 

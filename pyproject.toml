@@ -16,6 +16,7 @@ dependencies = [
   "pytest", 
   "tomli",
   "tts-data-utils>=0.7.1,<1.0.0",
+  "tts-dtat>=0.2.3,<1.0.0",
   "tts-html-utils>=0.5.2,<1.0.0",
   "tts-utilities>=0.3.0,<1.0.0"
 ]

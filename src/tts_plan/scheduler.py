@@ -487,7 +487,7 @@ class Scheduler(ABC):
         an activity's constraints are not satisfied.
         
         Returns:
-            List of (activity, constraint, violating_value) tuples for any violations.
+            List of (activity, constraint, violating_value) Tuples for any violations.
             Empty list if all constraints are satisfied or if modeled_values is not set.
             
         Note:
@@ -584,7 +584,7 @@ class Scheduler(ABC):
         
         return conflicting_activities
     
-    def find_all_conflicts(self) -> List[tuple[Activity, Activity]]:
+    def find_all_conflicts(self) -> List[Tuple[Activity, Activity]]:
         """
         Find all pairs of activities in the schedule that have conflicts.
         
@@ -592,7 +592,7 @@ class Scheduler(ABC):
         conflicts_with on every pair, as it only checks each unique pair once.
         
         Returns:
-            List[tuple[Activity, Activity]]: A list of tuples where each tuple contains
+            List[Tuple[Activity, Activity]]: A list of tuples where each tuple contains
                 two conflicting activities. Each conflict pair appears only once.
                 
         Examples:
@@ -652,7 +652,7 @@ class Scheduler(ABC):
             check_descendants: If True, also check constraints on child activities
             
         Returns:
-            List of tuples (activity, time, message) for each violation
+            List of Tuples (activity, time, message) for each violation
             
         Examples:
             >>> scheduler.compute_model({'battery_charge': 100.0})

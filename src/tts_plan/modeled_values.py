@@ -90,11 +90,13 @@ class ModeledValues:
         self._active_rates: Dict[str, List[Tuple[Any, float]]] = {}  # List of (activity, rate) for each model
         self._active_steps: Dict[str, List[Tuple[Any, float]]] = {}  # List of (activity, value) for STEPPED effects
         self._combination_modes: Dict[str, CombinationMode] = {}  # How to combine multiple effects
+        self._units: Dict[str, str] = {}  # Units for each model (e.g., 'Wh', 'MB', '°C')
         
-    def register_model(self, model_name: str, initial_value: float = 0.0, 
-                      combination_mode: CombinationMode = CombinationMode.ADD):
-        """Register a new modeled value.
-        
+    def register_model(self, model_name: str, initial_value: float = 0.0,
+                      combination_mode: CombinationMode = CombinationMode.ADD,
+                      unit: Optional[str] = None):
+        """Register a new modeled value with optional unit.
+
         Args:
             model_name: Name of the modeled value
             initial_value: Starting value at schedule start
@@ -103,6 +105,12 @@ class ModeledValues:
                 - MAX: Take maximum effect (for keepout zones, risk levels, etc.)
                 - MIN: Take minimum effect
                 - EXCLUSIVE: Only one effect allowed at a time (for on/off states)
+            unit: Optional unit string for display (e.g., 'Wh', 'MB', '°C', 'm/s')
+
+        Examples:
+            >>> scheduler.modeled_values.register_model('battery_wh', initial_value=10000.0, unit='Wh')
+            >>> scheduler.modeled_values.register_model('data_volume', initial_value=0.0, unit='MB')
+            >>> scheduler.modeled_values.register_model('temperature', initial_value=20.0, unit='°C')
         """
         self.initial_values[model_name] = initial_value
         self._current_values[model_name] = initial_value
@@ -110,6 +118,10 @@ class ModeledValues:
         self._active_rates[model_name] = []  # List of (activity, rate) tuples
         self._active_steps[model_name] = []  # List of (activity, value) tuples for STEPPED effects
         self.profiles[model_name] = []
+
+        # Store unit if specified
+        if unit is not None:
+            self._units[model_name] = unit
         
     def get_value_at_time(self, model_name: str, time: datetime) -> Optional[float]:
         """Get the value of a modeled variable at a specific time.
@@ -542,12 +554,14 @@ class ModeledValues:
             raise ValueError("No models to plot")
         
         # Convert profiles to pandas DataFrame in dtat format
-        # The dtat format expects columns: ['scet', 'name', 'value']
+        # The dtat format expects columns: ['scet', 'name', 'value', 'unit']
         data_rows = []
-        
+
         for model_name in model_names:
             profile = self.profiles[model_name]
-            
+            # Get unit for this model (default to 'Unknown' if not specified)
+            unit = self._units.get(model_name, 'Unknown')
+
             if not profile:
                 # If no profile points, use initial value at a dummy time
                 initial_val = self.initial_values.get(model_name, 0.0)
@@ -556,7 +570,8 @@ class ModeledValues:
                 data_rows.append({
                     'scet': dummy_time,
                     'name': model_name,
-                    'value': initial_val
+                    'value': initial_val,
+                    'unit': unit
                 })
             else:
                 # Add all profile points
@@ -564,14 +579,15 @@ class ModeledValues:
                     data_rows.append({
                         'scet': time,
                         'name': model_name,
-                        'value': value
+                        'value': value,
+                        'unit': unit
                     })
-        
+
         # Create DataFrame
         df = pd.DataFrame(data_rows)
-        
-        # Ensure proper column order
-        df = df[['scet', 'name', 'value']]
+
+        # Ensure proper column order (including 'unit' column for tts_dtat)
+        df = df[['scet', 'name', 'value', 'unit']]
         
         # Sort by time
         df = df.sort_values('scet')

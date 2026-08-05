@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum, auto
+import warnings
 
 import pandas as pd
 import tts_dtat.plot as dtat_plot
@@ -92,6 +93,7 @@ class ModeledValues:
         self._combination_modes: Dict[str, CombinationMode] = {}  # How to combine multiple effects
         self._min_values: Dict[str, float] = {}  # Minimum bounds for each model
         self._max_values: Dict[str, float] = {}  # Maximum bounds for each model
+        self._clamping_occurred: Dict[str, bool] = {}  # Track whether clamping occurred for each model
         
     def register_model(self, model_name: str, initial_value: float = 0.0,
                       combination_mode: CombinationMode = CombinationMode.ADD,
@@ -135,6 +137,7 @@ class ModeledValues:
         self._active_rates[model_name] = []  # List of (activity, rate) tuples
         self._active_steps[model_name] = []  # List of (activity, value) tuples for STEPPED effects
         self.profiles[model_name] = []
+        self._clamping_occurred[model_name] = False  # Track whether clamping has occurred
 
         # Store bounds if specified
         if min_value is not None:
@@ -232,6 +235,7 @@ class ModeledValues:
             self._current_values[model_name] = self.initial_values[model_name]
             self._active_rates[model_name] = []  # List of (activity, rate) tuples
             self._active_steps[model_name] = []  # List of (activity, value) tuples
+            self._clamping_occurred[model_name] = False  # Reset clamping flag
         
         # Collect all events (activity starts/ends with their effects)
         events: List[Tuple[datetime, str, Any, Effect]] = []
@@ -370,6 +374,19 @@ class ModeledValues:
                     if profile and profile[-1][0] < end_time:
                         # Add final point with current value
                         self.add_profile_point(model_name, end_time, self._current_values[model_name])
+
+        # Issue warnings if clamping occurred for any models
+        clamped_models = [name for name, occurred in self._clamping_occurred.items() if occurred]
+        if clamped_models:
+            warnings.warn(
+                f"Clamping occurred for the following modeled values during computation: {', '.join(clamped_models)}. "
+                f"This indicates that one or more activities caused values to exceed their registered min/max bounds. "
+                f"The values have been constrained to stay within bounds, which may hide the true magnitude of violations. "
+                f"Review your resource profiles to understand the impact. "
+                f"Future enhancements will provide more detailed reporting of clamping events and excess/deficit amounts.",
+                UserWarning,
+                stacklevel=2
+            )
             
     def _combine_stepped_values(self, model_name: str) -> float:
         """Combine active STEPPED effect values according to the model's combination mode.
@@ -430,6 +447,8 @@ class ModeledValues:
         Returns:
             The clamped value within [min_value, max_value]
         """
+        original_value = value
+
         # Apply minimum bound if specified
         if model_name in self._min_values:
             value = max(value, self._min_values[model_name])
@@ -437,6 +456,10 @@ class ModeledValues:
         # Apply maximum bound if specified
         if model_name in self._max_values:
             value = min(value, self._max_values[model_name])
+
+        # Track if clamping occurred
+        if value != original_value:
+            self._clamping_occurred[model_name] = True
 
         return value
 

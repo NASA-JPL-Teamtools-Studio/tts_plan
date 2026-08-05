@@ -94,12 +94,14 @@ class ModeledValues:
         self._min_values: Dict[str, float] = {}  # Minimum bounds for each model
         self._max_values: Dict[str, float] = {}  # Maximum bounds for each model
         self._clamping_occurred: Dict[str, bool] = {}  # Track whether clamping occurred for each model
+        self._units: Dict[str, str] = {}  # Units for each model (e.g., 'Wh', 'MB', '°C')
         
     def register_model(self, model_name: str, initial_value: float = 0.0,
                       combination_mode: CombinationMode = CombinationMode.ADD,
                       min_value: Optional[float] = None,
-                      max_value: Optional[float] = None):
-        """Register a new modeled value with optional bounds.
+                      max_value: Optional[float] = None,
+                      unit: Optional[str] = None):
+        """Register a new modeled value with optional bounds and unit.
 
         Args:
             model_name: Name of the modeled value
@@ -111,24 +113,28 @@ class ModeledValues:
                 - EXCLUSIVE: Only one effect allowed at a time (for on/off states)
             min_value: Minimum allowed value (enforced during computation). None = unbounded.
             max_value: Maximum allowed value (enforced during computation). None = unbounded.
+            unit: Optional unit string for display (e.g., 'Wh', 'MB', '°C', 'm/s')
 
         Examples:
             # Data storage: 0 MB to 32,000 MB
             scheduler.modeled_values.register_model(
                 'onboard_data', initial_value=0.0,
-                min_value=0.0, max_value=32000.0
+                min_value=0.0, max_value=32000.0,
+                unit='MB'
             )
 
             # Battery: 0 Wh to 10,000 Wh
             scheduler.modeled_values.register_model(
                 'battery_wh', initial_value=10000.0,
-                min_value=0.0, max_value=10000.0
+                min_value=0.0, max_value=10000.0,
+                unit='Wh'
             )
 
             # Temperature: -40°C to +85°C
             scheduler.modeled_values.register_model(
                 'temperature', initial_value=20.0,
-                min_value=-40.0, max_value=85.0
+                min_value=-40.0, max_value=85.0,
+                unit='°C'
             )
         """
         self.initial_values[model_name] = initial_value
@@ -144,6 +150,10 @@ class ModeledValues:
             self._min_values[model_name] = min_value
         if max_value is not None:
             self._max_values[model_name] = max_value
+
+        # Store unit if specified
+        if unit is not None:
+            self._units[model_name] = unit
         
     def get_value_at_time(self, model_name: str, time: datetime) -> Optional[float]:
         """Get the value of a modeled variable at a specific time.
@@ -629,12 +639,14 @@ class ModeledValues:
             raise ValueError("No models to plot")
         
         # Convert profiles to pandas DataFrame in dtat format
-        # The dtat format expects columns: ['scet', 'name', 'value']
+        # The dtat format expects columns: ['scet', 'name', 'value', 'unit']
         data_rows = []
-        
+
         for model_name in model_names:
             profile = self.profiles[model_name]
-            
+            # Get unit for this model (default to 'Unknown' if not specified)
+            unit = self._units.get(model_name, 'Unknown')
+
             if not profile:
                 # If no profile points, use initial value at a dummy time
                 initial_val = self.initial_values.get(model_name, 0.0)
@@ -643,7 +655,8 @@ class ModeledValues:
                 data_rows.append({
                     'scet': dummy_time,
                     'name': model_name,
-                    'value': initial_val
+                    'value': initial_val,
+                    'unit': unit
                 })
             else:
                 # Add all profile points
@@ -651,14 +664,15 @@ class ModeledValues:
                     data_rows.append({
                         'scet': time,
                         'name': model_name,
-                        'value': value
+                        'value': value,
+                        'unit': unit
                     })
-        
+
         # Create DataFrame
         df = pd.DataFrame(data_rows)
-        
-        # Ensure proper column order
-        df = df[['scet', 'name', 'value']]
+
+        # Ensure proper column order (including 'unit' column for tts_dtat)
+        df = df[['scet', 'name', 'value', 'unit']]
         
         # Sort by time
         df = df.sort_values('scet')

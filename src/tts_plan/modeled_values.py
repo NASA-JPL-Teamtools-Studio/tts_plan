@@ -388,6 +388,27 @@ class ModeledValues:
         # Issue warnings if clamping occurred for any models
         clamped_models = [name for name, occurred in self._clamping_occurred.items() if occurred]
         if clamped_models:
+            # Primary warning via print statement
+            print("\n" + "=" * 70)
+            print("WARNING: MODELED VALUE CLAMPING DETECTED")
+            print("=" * 70)
+            print(f"Clamping occurred for the following modeled values:")
+            for model_name in clamped_models:
+                min_val = self._min_values.get(model_name)
+                max_val = self._max_values.get(model_name)
+                bounds_str = f"min={min_val}, max={max_val}" if min_val is not None and max_val is not None else \
+                             f"min={min_val}" if min_val is not None else \
+                             f"max={max_val}" if max_val is not None else "unbounded"
+                print(f"  - {model_name} ({bounds_str})")
+            print("\nThis indicates that one or more activities caused values to exceed")
+            print("their registered min/max bounds. The values have been constrained to")
+            print("stay within bounds, which may hide the true magnitude of violations.")
+            print("\nAction required: Review your resource profiles to understand the impact.")
+            print("Future enhancements will provide more detailed reporting of clamping")
+            print("events and excess/deficit amounts.")
+            print("=" * 70 + "\n")
+
+            # Also issue a Python warning for tools that capture warnings
             warnings.warn(
                 f"Clamping occurred for the following modeled values during computation: {', '.join(clamped_models)}. "
                 f"This indicates that one or more activities caused values to exceed their registered min/max bounds. "

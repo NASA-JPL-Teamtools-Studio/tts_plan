@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum, auto
+import warnings
 
 import pandas as pd
 import tts_dtat.plot as dtat_plot
@@ -79,7 +80,7 @@ class ModeledValues:
     
     def __init__(self, initial_values: Optional[Dict[str, float]] = None):
         """Initialize the modeling system.
-        
+
         Args:
             initial_values: Dictionary mapping model names to their initial values
                 (e.g., {'battery_charge': 100.0, 'data_volume': 0.0})
@@ -90,11 +91,18 @@ class ModeledValues:
         self._active_rates: Dict[str, List[Tuple[Any, float]]] = {}  # List of (activity, rate) for each model
         self._active_steps: Dict[str, List[Tuple[Any, float]]] = {}  # List of (activity, value) for STEPPED effects
         self._combination_modes: Dict[str, CombinationMode] = {}  # How to combine multiple effects
+        self._min_values: Dict[str, float] = {}  # Minimum bounds for each model
+        self._max_values: Dict[str, float] = {}  # Maximum bounds for each model
+        self._clamping_occurred: Dict[str, bool] = {}  # Track whether clamping occurred for each model
+        self._units: Dict[str, str] = {}  # Units for each model (e.g., 'Wh', 'MB', '°C')
         
-    def register_model(self, model_name: str, initial_value: float = 0.0, 
-                      combination_mode: CombinationMode = CombinationMode.ADD):
-        """Register a new modeled value.
-        
+    def register_model(self, model_name: str, initial_value: float = 0.0,
+                      combination_mode: CombinationMode = CombinationMode.ADD,
+                      min_value: Optional[float] = None,
+                      max_value: Optional[float] = None,
+                      unit: Optional[str] = None):
+        """Register a new modeled value with optional bounds and unit.
+
         Args:
             model_name: Name of the modeled value
             initial_value: Starting value at schedule start
@@ -103,6 +111,31 @@ class ModeledValues:
                 - MAX: Take maximum effect (for keepout zones, risk levels, etc.)
                 - MIN: Take minimum effect
                 - EXCLUSIVE: Only one effect allowed at a time (for on/off states)
+            min_value: Minimum allowed value (enforced during computation). None = unbounded.
+            max_value: Maximum allowed value (enforced during computation). None = unbounded.
+            unit: Optional unit string for display (e.g., 'Wh', 'MB', '°C', 'm/s')
+
+        Examples:
+            # Data storage: 0 MB to 32,000 MB
+            scheduler.modeled_values.register_model(
+                'onboard_data', initial_value=0.0,
+                min_value=0.0, max_value=32000.0,
+                unit='MB'
+            )
+
+            # Battery: 0 Wh to 10,000 Wh
+            scheduler.modeled_values.register_model(
+                'battery_wh', initial_value=10000.0,
+                min_value=0.0, max_value=10000.0,
+                unit='Wh'
+            )
+
+            # Temperature: -40°C to +85°C
+            scheduler.modeled_values.register_model(
+                'temperature', initial_value=20.0,
+                min_value=-40.0, max_value=85.0,
+                unit='°C'
+            )
         """
         self.initial_values[model_name] = initial_value
         self._current_values[model_name] = initial_value
@@ -110,6 +143,17 @@ class ModeledValues:
         self._active_rates[model_name] = []  # List of (activity, rate) tuples
         self._active_steps[model_name] = []  # List of (activity, value) tuples for STEPPED effects
         self.profiles[model_name] = []
+        self._clamping_occurred[model_name] = False  # Track whether clamping has occurred
+
+        # Store bounds if specified
+        if min_value is not None:
+            self._min_values[model_name] = min_value
+        if max_value is not None:
+            self._max_values[model_name] = max_value
+
+        # Store unit if specified
+        if unit is not None:
+            self._units[model_name] = unit
         
     def get_value_at_time(self, model_name: str, time: datetime) -> Optional[float]:
         """Get the value of a modeled variable at a specific time.
@@ -201,6 +245,7 @@ class ModeledValues:
             self._current_values[model_name] = self.initial_values[model_name]
             self._active_rates[model_name] = []  # List of (activity, rate) tuples
             self._active_steps[model_name] = []  # List of (activity, value) tuples
+            self._clamping_occurred[model_name] = False  # Reset clamping flag
         
         # Collect all events (activity starts/ends with their effects)
         events: List[Tuple[datetime, str, Any, Effect]] = []
@@ -262,8 +307,11 @@ class ModeledValues:
                     # Add point just before the jump (infinitesimally earlier) with old value
                     pre_time = time - timedelta(microseconds=1)
                     self.add_profile_point(model_name, pre_time, self._current_values[model_name])
-                    # Now add the jump
-                    self._current_values[model_name] += effect.value
+                    # Now add the jump, clamped to bounds
+                    self._current_values[model_name] = self._clamp_value(
+                        model_name,
+                        self._current_values[model_name] + effect.value
+                    )
                     self.add_profile_point(model_name, time, self._current_values[model_name])
                     
             elif event_type == 'step_start':
@@ -274,9 +322,12 @@ class ModeledValues:
                 
                 # Add this activity's step to the active list
                 self._active_steps[model_name].append((activity, effect.value))
-                
-                # Recalculate current value based on combination mode
-                self._current_values[model_name] = self._combine_stepped_values(model_name)
+
+                # Recalculate current value based on combination mode, clamped to bounds
+                self._current_values[model_name] = self._clamp_value(
+                    model_name,
+                    self._combine_stepped_values(model_name)
+                )
                 self.add_profile_point(model_name, time, self._current_values[model_name])
                     
             elif event_type == 'step_end':
@@ -289,9 +340,12 @@ class ModeledValues:
                 self._active_steps[model_name] = [
                     (a, v) for a, v in self._active_steps[model_name] if a != activity
                 ]
-                
-                # Recalculate current value based on remaining active steps
-                self._current_values[model_name] = self._combine_stepped_values(model_name)
+
+                # Recalculate current value based on remaining active steps, clamped to bounds
+                self._current_values[model_name] = self._clamp_value(
+                    model_name,
+                    self._combine_stepped_values(model_name)
+                )
                 self.add_profile_point(model_name, time, self._current_values[model_name])
                     
             elif event_type == 'rate_start':
@@ -330,6 +384,40 @@ class ModeledValues:
                     if profile and profile[-1][0] < end_time:
                         # Add final point with current value
                         self.add_profile_point(model_name, end_time, self._current_values[model_name])
+
+        # Issue warnings if clamping occurred for any models
+        clamped_models = [name for name, occurred in self._clamping_occurred.items() if occurred]
+        if clamped_models:
+            # Primary warning via print statement
+            print("\n" + "=" * 70)
+            print("WARNING: MODELED VALUE CLAMPING DETECTED")
+            print("=" * 70)
+            print(f"Clamping occurred for the following modeled values:")
+            for model_name in clamped_models:
+                min_val = self._min_values.get(model_name)
+                max_val = self._max_values.get(model_name)
+                bounds_str = f"min={min_val}, max={max_val}" if min_val is not None and max_val is not None else \
+                             f"min={min_val}" if min_val is not None else \
+                             f"max={max_val}" if max_val is not None else "unbounded"
+                print(f"  - {model_name} ({bounds_str})")
+            print("\nThis indicates that one or more activities caused values to exceed")
+            print("their registered min/max bounds. The values have been constrained to")
+            print("stay within bounds, which may hide the true magnitude of violations.")
+            print("\nAction required: Review your resource profiles to understand the impact.")
+            print("Future enhancements will provide more detailed reporting of clamping")
+            print("events and excess/deficit amounts.")
+            print("=" * 70 + "\n")
+
+            # Also issue a Python warning for tools that capture warnings
+            warnings.warn(
+                f"Clamping occurred for the following modeled values during computation: {', '.join(clamped_models)}. "
+                f"This indicates that one or more activities caused values to exceed their registered min/max bounds. "
+                f"The values have been constrained to stay within bounds, which may hide the true magnitude of violations. "
+                f"Review your resource profiles to understand the impact. "
+                f"Future enhancements will provide more detailed reporting of clamping events and excess/deficit amounts.",
+                UserWarning,
+                stacklevel=2
+            )
             
     def _combine_stepped_values(self, model_name: str) -> float:
         """Combine active STEPPED effect values according to the model's combination mode.
@@ -376,7 +464,36 @@ class ModeledValues:
         else:
             # Default to ADD
             return self.initial_values.get(model_name, 0.0) + sum(values)
-    
+
+    def _clamp_value(self, model_name: str, value: float) -> float:
+        """Clamp a value to its registered min/max bounds.
+
+        This enforces physical constraints during computation, ensuring values
+        stay within realistic ranges (e.g., battery charge >= 0, data storage >= 0).
+
+        Args:
+            model_name: Name of the model
+            value: The value to clamp
+
+        Returns:
+            The clamped value within [min_value, max_value]
+        """
+        original_value = value
+
+        # Apply minimum bound if specified
+        if model_name in self._min_values:
+            value = max(value, self._min_values[model_name])
+
+        # Apply maximum bound if specified
+        if model_name in self._max_values:
+            value = min(value, self._max_values[model_name])
+
+        # Track if clamping occurred
+        if value != original_value:
+            self._clamping_occurred[model_name] = True
+
+        return value
+
     def _apply_active_rates(self, to_time: datetime):
         """Apply all active constant rates up to the specified time.
         
@@ -418,11 +535,11 @@ class ModeledValues:
             else:
                 combined_rate = sum(rates)  # Default to ADD
             
-            # Compute change
+            # Compute change, clamped to bounds
             dt = (to_time - last_time).total_seconds()
             delta = combined_rate * dt
-            new_value = last_value + delta
-            
+            new_value = self._clamp_value(model_name, last_value + delta)
+
             # Update current value and add profile point
             self._current_values[model_name] = new_value
             self.add_profile_point(model_name, to_time, new_value)
@@ -502,7 +619,8 @@ class ModeledValues:
              figure_height: Optional[int] = None,
              figure_width: Optional[int] = None,
              background_color: str = '#fcfcfc',
-             axis_line_color: str = '#555555'):
+             axis_line_color: str = '#555555',
+             **kwargs):
         """Plot the modeled value profiles over time using tts_dtat.
         
         Args:
@@ -542,12 +660,14 @@ class ModeledValues:
             raise ValueError("No models to plot")
         
         # Convert profiles to pandas DataFrame in dtat format
-        # The dtat format expects columns: ['scet', 'name', 'value']
+        # The dtat format expects columns: ['scet', 'name', 'value', 'unit']
         data_rows = []
-        
+
         for model_name in model_names:
             profile = self.profiles[model_name]
-            
+            # Get unit for this model (default to 'Unknown' if not specified)
+            unit = self._units.get(model_name, 'Unknown')
+
             if not profile:
                 # If no profile points, use initial value at a dummy time
                 initial_val = self.initial_values.get(model_name, 0.0)
@@ -556,7 +676,8 @@ class ModeledValues:
                 data_rows.append({
                     'scet': dummy_time,
                     'name': model_name,
-                    'value': initial_val
+                    'value': initial_val,
+                    'unit': unit
                 })
             else:
                 # Add all profile points
@@ -564,14 +685,15 @@ class ModeledValues:
                     data_rows.append({
                         'scet': time,
                         'name': model_name,
-                        'value': value
+                        'value': value,
+                        'unit': unit
                     })
-        
+
         # Create DataFrame
         df = pd.DataFrame(data_rows)
-        
-        # Ensure proper column order
-        df = df[['scet', 'name', 'value']]
+
+        # Ensure proper column order (including 'unit' column for tts_dtat)
+        df = df[['scet', 'name', 'value', 'unit']]
         
         # Sort by time
         df = df.sort_values('scet')
@@ -595,7 +717,8 @@ class ModeledValues:
             background_color=background_color,
             axis_line_color=axis_line_color,
             plot_lines=True,
-            doy=True  # Format dates nicely
+            doy=True,  # Format dates nicely
+            **kwargs
         )
         
         return graph

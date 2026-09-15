@@ -562,6 +562,12 @@ class Activity(ABC):
         
         # UUID for debugging
         rows.append(("UUID", self.uuid[:8]))
+
+        # Sequence ID and command (if present)
+        if getattr(self, "seqid", None):
+            rows.append(("Sequence ID", self.seqid))
+        if getattr(self, "command", None):
+            rows.append(("Command", self.command))
         
         return rows
 

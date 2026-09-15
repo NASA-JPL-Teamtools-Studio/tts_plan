@@ -3,33 +3,40 @@ name = "tts-plan"
 description = "A bare bones planning and scheduling tool for TTS."
 readme = "README.md"
 requires-python = ">=3.6"
-classifiers = [ "Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License",]
-dependencies = [ "pytest", "tomli", "tts-data-utils>=0.7.1,<1.0.0", "tts-html-utils>=0.5.2,<1.0.0", "tts-utilities>=0.3.0,<1.0.0",]
-dynamic = [ "version",]
-[[project.authors]]
-name = "shanemb"
-email = "shane.m.bonkowski@jpl.nasa.gov"
-
-[[project.authors]]
-name = "muszynsk"
-email = "matt.muszynski@jpl.nasa.gov"
-
-[build-system]
-requires = [ "setuptools", "wheel", "toml", "tts-utilities>=0.3.0,<1.0.0", "setuptools-scm",]
-build-backend = "setuptools.build_meta"
-
-[project.license]
-text = "Apache-2.0"
+license = {text = "Apache-2.0"}
+authors = [
+  { name = "shanemb", email = "shane.m.bonkowski@jpl.nasa.gov" },
+  { name = "muszynsk", email = "matt.muszynski@jpl.nasa.gov" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+]
+dependencies = [
+  "pytest", 
+  "tomli",
+  "tts-data-utils>=0.7.1,<1.0.0",
+  "tts-html-utils>=0.5.2,<1.0.0",
+  "tts-utilities>=0.3.0,<1.0.0"
+]
+dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://github.com/NASA-JPL-Teamtools-Studio/tts_plan"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
 
-[tool.tts-ctx]
-type = "core"
-
-[tool.setuptools.packages.find]
-where = [ "src",]
+[build-system]
+requires = [
+  "setuptools", 
+  "wheel", 
+  "toml", 
+  "tts-utilities>=0.3.0,<1.0.0", 
+  "setuptools-scm"
+  ]
+build-backend = "setuptools.build_meta"

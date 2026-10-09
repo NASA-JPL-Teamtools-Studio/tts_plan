@@ -450,6 +450,8 @@ class Activity(ABC):
         self.constraints = [] if constraints is None else constraints
         self.seqid = seqid
         self.command = command
+        self.command_stem = kwargs.get('command_stem')
+        self.command_args = kwargs.get('command_args', [])
         if seqid is not None and command is not None:
             raise Exception('Activity cannot have both seqid and command.')
         self.claims = [] if claims is None else claims
@@ -568,6 +570,10 @@ class Activity(ABC):
             rows.append(("Sequence ID", self.seqid))
         if getattr(self, "command", None):
             rows.append(("Command", self.command))
+        if getattr(self, "command_stem", None):
+            rows.append(("Stem", self.command_stem))
+        if getattr(self, "command_args", None):
+            rows.append(("Args", ", ".join(self.command_args) if isinstance(self.command_args, list) else self.command_args))
         
         return rows
 
@@ -594,7 +600,9 @@ class Activity(ABC):
             "below_the_fold": self.below_the_fold,
             "hover_text": self.get_hover_text(),  # Generate custom hover text
             "seqid": self.seqid,
-            "command": self.command
+            "command": self.command,
+            "command_stem": self.command_stem,
+            "command_args": self.command_args,
         }
         
         # Add metadata if present
@@ -809,7 +817,9 @@ class Activity(ABC):
             color=json_data.get("color"),
             highlight_full_height=json_data.get("highlight_full_height", False),
             below_the_fold=json_data.get("below_the_fold", False),
-            metadata=metadata
+            metadata=metadata,
+            command_stem=json_data.get("command_stem"),
+            command_args=json_data.get("command_args"),
         )
         
         # Call the subclass-specific method to handle additional attributes
